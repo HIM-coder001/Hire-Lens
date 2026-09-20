@@ -1,0 +1,117 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+
+enum Role { RECRUITER ADMIN CANDIDATE }
+enum ApplicationStatus { APPLIED SCREENED INTERVIEW OFFER REJECTED }
+enum EducationLevel { NONE HIGH_SCHOOL BACHELORS MASTERS PHD }
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  role Role
+  name String
+  createdAt DateTime @default(now())
+  candidate Candidate?
+  auditEvents AuditLog[]
+  timestampNotes TimestampNote[]
+  scorecards Scorecard[]
+}
+model Candidate {
+  id String @id @default(cuid())
+  userId String @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phone String?
+  location String?
+  yearsExperience Int @default(0)
+  skills String[]
+  resumeUrl String?
+  applications Application[]
+}
+model Job {
+  id String @id @default(cuid())
+  title String
+  description String
+  location String
+  remote Boolean @default(false)
+  education EducationLevel @default(NONE)
+  minYearsExperience Int @default(0)
+  requiredSkills String[]
+  scoreWeights Json
+  screeningQuestions ScreeningQuestion[]
+  applications Application[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([remote, createdAt])
+}
+model ScreeningQuestion {
+  id String @id @default(cuid())
+  jobId String
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  prompt String
+  order Int
+  responses VideoResponse[]
+  @@unique([jobId, order])
+}
+model Application {
+  id String @id @default(cuid())
+  jobId String
+  candidateId String
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  status ApplicationStatus @default(APPLIED)
+  score Int @default(0)
+  scoreBreakdown Json
+  responses VideoResponse[]
+  scorecards Scorecard[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status])
+  @@index([jobId])
+  @@index([candidateId])
+  @@index([score])
+  @@unique([jobId, candidateId])
+}
+model VideoResponse {
+  id String @id @default(cuid())
+  applicationId String
+  questionId String
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  question ScreeningQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  storageKey String?
+  textFallback String?
+  durationSeconds Int?
+  notes TimestampNote[]
+  createdAt DateTime @default(now())
+  @@unique([applicationId, questionId])
+}
+model TimestampNote {
+  id String @id @default(cuid())
+  responseId String
+  authorId String
+  response VideoResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+  timestampSeconds Int
+  body String
+  createdAt DateTime @default(now())
+}
+model Scorecard {
+  id String @id @default(cuid())
+  applicationId String
+  interviewerId String
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  interviewer User @relation(fields: [interviewerId], references: [id])
+  competencyRatings Json
+  comments String
+  createdAt DateTime @default(now())
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String
+  actor User @relation(fields: [actorId], references: [id])
+  action String
+  entityType String
+  entityId String
+  createdAt DateTime @default(now())
+  @@index([entityType, entityId])
+}

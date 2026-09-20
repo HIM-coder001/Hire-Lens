@@ -1,0 +1,13 @@
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import sanitizeHtml from 'sanitize-html';
+import { ApplicationStatus } from '@prisma/client';
+import { PrismaService } from '../prisma.service';
+import { ScoringService } from '../scoring/scoring.service';
+@Injectable()
+export class ApplicationsService {
+  constructor(private readonly prisma: PrismaService, private readonly scoring: ScoringService) {}
+  async list(user: { sub: string; role: string }, filters: { jobId?: string; status?: ApplicationStatus; minScore?: number }) { const candidate = user.role === 'CANDIDATE' ? await this.prisma.candidate.findUnique({ where: { userId: user.sub } }) : null; return this.prisma.application.findMany({ where: { ...(candidate ? { candidateId: candidate.id } : {}), ...(filters.jobId ? { jobId: filters.jobId } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.minScore ? { score: { gte: filters.minScore } } : {}) }, include: { candidate: { include: { user: { select: { name: true, email: true } } } }, job: { select: { id: true, title: true } }, responses: { include: { question: true, notes: true } } }, orderBy: { score: 'desc' } }); }
+  async create(userId: string, input: any) { const candidate = await this.prisma.candidate.findUnique({ where: { userId } }); if (!candidate) throw new NotFoundException('Candidate profile not found'); const job = await this.prisma.job.findUnique({ where: { id: input.jobId } }); if (!job) throw new NotFoundException('Job not found'); const result = this.scoring.calculate({ requiredSkills: job.requiredSkills, candidateSkills: input.skills, minYears: job.minYearsExperience, candidateYears: input.yearsExperience }); return this.prisma.application.create({ data: { jobId: job.id, candidateId: candidate.id, score: result.score, scoreBreakdown: result.breakdown, responses: { create: input.responses.map((response: any) => ({ questionId: response.questionId, textFallback: response.textFallback ? sanitizeHtml(response.textFallback, { allowedTags: [], allowedAttributes: {} }) : undefined, storageKey: response.storageKey })) } }, include: { responses: true } }); }
+  async move(id: string, status: ApplicationStatus) { return this.prisma.application.update({ where: { id }, data: { status } }); }
+  async own(user: { sub: string; role: string }, applicationId: string) { const application = await this.prisma.application.findUnique({ where: { id: applicationId }, include: { candidate: true } }); if (!application) throw new NotFoundException(); if (user.role === 'CANDIDATE' && application.candidate.userId !== user.sub) throw new ForbiddenException(); return application; }
+}
